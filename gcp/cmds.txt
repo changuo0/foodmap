@@ -1,0 +1,2 @@
+gcloud app deploy
+gcloud sql connect mysql0 --user=root
