@@ -23,3 +23,7 @@
 *.test
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+foodmap-frontend/.git/
+foodmap-frontend/.idea/
+foodmap-frontend/mayor-app/
