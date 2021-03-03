@@ -1,10 +1,11 @@
 package main
 
-// cd foodmap-nashville
+// cd foodmap-frontend/mayor-app
 // npm install
 // npm run build
-// cd ..
-// go run test.go
+// mv build ..
+// cd ../..
+// gcloud app deploy
 
 // TODO make it so people cant just inject sql code
 
