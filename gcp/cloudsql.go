@@ -1,10 +1,12 @@
 package main
 
-// cd test-app
+// cd foodmap-nashville
 // npm install
 // npm run build
 // cd ..
 // go run test.go
+
+// TODO make it so people cant just inject sql code
 
 import (
 	"net/http"
