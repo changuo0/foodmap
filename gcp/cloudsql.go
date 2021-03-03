@@ -114,6 +114,8 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	buf := bytes.NewBufferString("")
+	fmt.Fprintf(buf, "[")
+	first := true
 	for rows.Next() {
 		var name string
 		var contact string
@@ -127,8 +129,13 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "error at location 2: " + err.Error(), 500)
 			return
 		}
-		fmt.Fprintf(buf, "%s, %s, %s, %s, %d, %s, %d\n", name, contact, notes, location, zip, foodtype, id)
+		if !first {
+			fmt.Fprintf(buf,",")
+		}
+		fmt.Fprintf(buf, "{\"name\":\"%s\", \"contact\":\"%s\", \"notes\":\"%s\", \"location\":\"%s\", \"zip\":%d, \"foodtype\":\"%s\", \"id\":%d}\n", name, contact, notes, location, zip, foodtype, id)
+		first = false
 	}
+	fmt.Fprintf(buf, "]")
 	w.Write(buf.Bytes())
 }
 
