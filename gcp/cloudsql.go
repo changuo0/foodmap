@@ -1,13 +1,12 @@
 package main
 
+// git clone https://github.com/changuo0/foodmap-frontend
 // cd foodmap-frontend/mayor-app
 // npm install
 // npm run build
-// mv build ..
+// mv build ../../website
 // cd ../..
 // gcloud app deploy
-
-// TODO make it so people cant just inject sql code
 
 import (
 	"net/http"
@@ -16,9 +15,72 @@ import (
 	"os"
 	"log"
 	"bytes"
-	_ "github.com/go-sql-driver/mysql"
-	"database/sql"
+
+	"encoding/json"
+	"io/ioutil"
+
+	"golang.org/x/net/context"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/sheets/v4"
 )
+
+// Retrieve a token, saves the token, then returns the generated client.
+func getClient(config *oauth2.Config) *http.Client {
+        // The file token.json stores the user's access and refresh tokens, and is
+        // created automatically when the authorization flow completes for the first
+        // time.
+        tokFile := "token.json"
+        tok, err := tokenFromFile(tokFile)
+        if err != nil {
+                tok = getTokenFromWeb(config)
+                saveToken(tokFile, tok)
+        }
+        return config.Client(context.Background(), tok)
+}
+
+// Request a token from the web, then returns the retrieved token.
+func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
+        authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+        fmt.Printf("Go to the following link in your browser then type the "+
+                "authorization code: \n%v\n", authURL)
+
+        var authCode string
+        if _, err := fmt.Scan(&authCode); err != nil {
+                log.Fatalf("Unable to read authorization code: %v", err)
+        }
+
+        tok, err := config.Exchange(context.TODO(), authCode)
+        if err != nil {
+                log.Fatalf("Unable to retrieve token from web: %v", err)
+        }
+        return tok
+}
+
+// Retrieves a token from a local file.
+func tokenFromFile(file string) (*oauth2.Token, error) {
+        f, err := os.Open(file)
+        if err != nil {
+                return nil, err
+        }
+        defer f.Close()
+        tok := &oauth2.Token{}
+        err = json.NewDecoder(f).Decode(tok)
+        return tok, err
+}
+
+// Saves a token to a file path.
+func saveToken(path string, token *oauth2.Token) {
+        fmt.Printf("Saving credential file to: %s\n", path)
+        f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+        if err != nil {
+                log.Fatalf("Unable to cache oauth token: %v", err)
+        }
+        defer f.Close()
+        json.NewEncoder(f).Encode(token)
+}
+
+
 
 type indexHtmlDefaultFs struct {
 	http.FileSystem
@@ -54,30 +116,27 @@ func parseUrl(ignore string, urlPath string) map[string]string {
 	return urlMap
 }
 
-var db *sql.DB
+var sheetSrv *sheets.Service
 
-// DB gets a connection to the database.
-// This can panic for malformed database connection strings, invalid credentials, or non-existance database instance.
-func DB() *sql.DB {
-	var (
-		connectionName = mustGetenv("CLOUDSQL_CONNECTION_NAME")
-		user           = mustGetenv("CLOUDSQL_USER")
-		dbName         = os.Getenv("CLOUDSQL_DATABASE_NAME") // NOTE: dbName may be empty
-		password       = os.Getenv("CLOUDSQL_PASSWORD")      // NOTE: password may be empty
-		socket         = os.Getenv("CLOUDSQL_SOCKET_PREFIX")
-	)
-	// /cloudsql is used on App Engine.
-	if socket == "" {
-		socket = "/cloudsql"
-	}
-	// MySQL Connection, comment out to use PostgreSQL.
-	// connection string format: USER:PASSWORD@unix(/cloudsql/PROJECT_ID:REGION_ID:INSTANCE_ID)/[DB_NAME]
-	dbURI := fmt.Sprintf("%s:%s@unix(%s/%s)/%s", user, password, socket, connectionName, dbName)
-	conn, err := sql.Open("mysql", dbURI)
+func loadSpreadsheet() *sheets.Service {
+	b, err := ioutil.ReadFile("credentials.json")
 	if err != nil {
-		panic(fmt.Sprintf("DB: %v", err))
+		log.Fatalf("Unable to read client secret file: %v", err)
 	}
-	return conn
+
+	// If modifying these scopes, delete your previously saved token.json.
+	config, err := google.ConfigFromJSON(b, "https://www.googleapis.com/auth/spreadsheets.readonly")
+	if err != nil {
+		log.Fatalf("Unable to parse client secret file to config: %v", err)
+	}
+	client := getClient(config)
+
+	srv, err := sheets.New(client)
+	if err != nil {
+		log.Fatalf("Unable to retrieve Sheets client: %v", err)
+	}
+
+	return srv
 }
 
 func mustGetenv(k string) string {
@@ -89,51 +148,32 @@ func mustGetenv(k string) string {
 }
 
 // ASSUMPTION: database fields don't have "/"s or "="s in them
-// ANOTHER ASSUMPTION: sending db query over http doesnt compromise privacy
-func dbHandler(w http.ResponseWriter, r *http.Request) {
-	urlMap := parseUrl("db", r.URL.Path)
+func sheetHandler(w http.ResponseWriter, r *http.Request) {
+	srv := sheetSrv
+
+	urlMap := parseUrl("sheet", r.URL.Path)
 	if urlMap == nil {
 		return
 	}
 
-	query := "SELECT * FROM organizations"
-	if len(urlMap) > 0 {
-		query += " WHERE "
-		for k,v := range urlMap {
-			query += k + " = " + v + " AND "
-		}
-		query = query[:len(query) - len(" AND ")]
-	}
-	query += ";"
-	rows, err := db.Query(query)
+	// Prints the names and majors of students in a sample spreadsheet:
+	// https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
+	spreadsheetId := "1lLlkGGKVapJ1Ot0QDoXKM-24vJWmOnA_BS5Rro17BA0"
+	readRange := "Sheet1!A1:B"
+	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()
 	if err != nil {
-		log.Printf("Could not query db: %v", err)
-		http.Error(w, "error at location 1: " + err.Error(), 500)
-		return
+		log.Fatalf("Unable to retrieve data from sheet: %v", err)
 	}
-	defer rows.Close()
 
 	w.Header().Set("Content-Type", "text/plain")
 	buf := bytes.NewBufferString("")
 	fmt.Fprintf(buf, "[")
 	first := true
-	for rows.Next() {
-		var name string
-		var contact string
-		var notes string
-		var location string
-		var zip int
-		var foodtype string
-		var id int
-		if err := rows.Scan(&name,&contact,&notes,&location,&zip,&foodtype,&id); err != nil {
-			log.Printf("Could not scan result: %v", err)
-			http.Error(w, "error at location 2: " + err.Error(), 500)
-			return
-		}
+	for _, row := range resp.Values {
 		if !first {
 			fmt.Fprintf(buf,",")
 		}
-		fmt.Fprintf(buf, "{\"name\":\"%s\", \"contact\":\"%s\", \"notes\":\"%s\", \"location\":\"%s\", \"zip\":%d, \"foodtype\":\"%s\", \"id\":%d}\n", name, contact, notes, location, zip, foodtype, id)
+		fmt.Fprintf(buf, "{\"firstThing\":\"%s\", \"secondThing\":\"%s\"}\n", row[0],row[1])
 		first = false
 	}
 	fmt.Fprintf(buf, "]")
@@ -152,12 +192,11 @@ func calHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	db = DB()
-	db.Exec("USE foodmap;")
+	sheetSrv = loadSpreadsheet()
 
-	http.HandleFunc("/db/", dbHandler)
+	http.HandleFunc("/sheet/", sheetHandler)
 	http.HandleFunc("/cal/", calHandler)
-	fs := indexHtmlDefaultFs{http.Dir("foodmap-frontend/build")}
+	fs := indexHtmlDefaultFs{http.Dir("website")}
 	http.Handle("/", http.FileServer(fs))
 	http.ListenAndServe(":8080", nil)
 }

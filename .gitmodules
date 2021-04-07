@@ -1,3 +1,0 @@
-[submodule "gcp/foodmap-frontend"]
-	path = gcp/foodmap-frontend
-	url = https://github.com/changuo0/foodmap-frontend
