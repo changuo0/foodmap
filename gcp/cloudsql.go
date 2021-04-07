@@ -1,5 +1,15 @@
 package main
 
+// NOTE: even though this is called cloudsql.go, it does not do anything with sql
+// i'm just too lazy to rename everything
+
+// google sheets setup:
+// get a certificate.json from google cloud or something, i forget how this part works tbh
+// go run cloudsql.go
+// will guide you through making a token.json
+
+// website setup:
+// do google sheets setup above
 // git clone https://github.com/changuo0/foodmap-frontend
 // cd foodmap-frontend/mayor-app
 // npm install
