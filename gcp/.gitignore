@@ -1,4 +1,5 @@
 app.yaml
 website/
+foodmap-frontend/
 credentials.json
 token.json

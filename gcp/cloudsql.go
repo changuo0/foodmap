@@ -158,8 +158,8 @@ func sheetHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Prints the names and majors of students in a sample spreadsheet:
 	// https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
-	spreadsheetId := "1lLlkGGKVapJ1Ot0QDoXKM-24vJWmOnA_BS5Rro17BA0"
-	readRange := "Sheet1!A1:B"
+	spreadsheetId := "1XrmXfbWx_oWC0sqOIdfZzPFIMinkiiijyUAKy2FUXw4"
+	readRange := "Form Responses 1!C2:L"
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve data from sheet: %v", err)
@@ -170,11 +170,31 @@ func sheetHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(buf, "[")
 	first := true
 	for _, row := range resp.Values {
-		if !first {
-			fmt.Fprintf(buf,",")
+		meetsReqs := row[9] == "yes"
+
+		zipWanted,exists := urlMap["zip"]
+		if exists {
+			meetsReqs = meetsReqs && zipWanted == row[1]
 		}
-		fmt.Fprintf(buf, "{\"firstThing\":\"%s\", \"secondThing\":\"%s\"}\n", row[0],row[1])
-		first = false
+
+		typeWanted,exists := urlMap["type"]
+		if exists {
+			meetsReqs = meetsReqs && typeWanted == row[2]
+		}
+
+		deliveryWanted,exists := urlMap["delivery"]
+		if exists {
+			meetsReqs = meetsReqs && (deliveryWanted != "true" || row[3] == "Yes")
+		}
+
+		if meetsReqs {
+			if !first {
+				fmt.Fprintf(buf,",")
+			}
+			fmt.Fprintf(buf, `{ "name": "%s", "description": "%s", "contact": "%s", "type": "%s", "address": "%s", "zip": %s, "latitude": %s, "longitude": %s, "deliveryServices": %t }`,
+				row[4],row[5],row[6],row[2],row[0],row[1],row[7],row[8],row[3] == "Yes")
+			first = false
+		}
 	}
 	fmt.Fprintf(buf, "]")
 	w.Write(buf.Bytes())
